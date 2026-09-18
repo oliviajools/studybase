@@ -1,7 +1,7 @@
-// Trag hier die Daten deines Supabase-Projekts ein
-// (Supabase → Project Settings → API).
-// Der "anon public" Key darf öffentlich sein – die Daten schützt die Datenbank selbst.
+// Daten deines Supabase-Projekts (Supabase → Project Settings → API Keys).
+// Der "publishable key" (früher "anon public key") darf öffentlich sein –
+// die Daten schützt die Datenbank selbst. Den "secret key" NIEMALS hier eintragen!
 window.LERNRAUM_CONFIG = {
-  supabaseUrl: "",      // z. B. "https://abcdefgh.supabase.co"
-  supabaseAnonKey: ""   // z. B. "eyJhbGciOi..."
+  supabaseUrl: "https://cthhrqwxqmjmdsscaank.supabase.co",
+  supabaseAnonKey: ""   // hier den kompletten Publishable key einfügen: "sb_publishable_..."
 };

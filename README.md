@@ -22,14 +22,14 @@ Ein kleines Dashboard für die Nachhilfe. SchülerInnen sehen dort zwischen den 
 2. **Datenbank einrichten:** *SQL Editor → New query* öffnen, den Inhalt von [`supabase/schema.sql`](supabase/schema.sql) einfügen und auf *Run* klicken.
 3. **Lehrerinnen-Account anlegen:** Unter *Authentication → Users → Add user* E-Mail und Passwort eintragen und „Auto Confirm User“ anhaken.
 4. **Registrierung schließen:** Unter *Authentication → Sign In / Providers* die Option **„Allow new users to sign up“ ausschalten**. So kann sich niemand sonst einen Account anlegen.
-5. **App verbinden:** In [`config.js`](config.js) die *Project URL* und den *anon public key* eintragen. Beides steht unter *Project Settings → API*.
-6. **Veröffentlichen:** Im GitHub-Repo unter *Settings → Pages* die *Source* „Deploy from a branch“ wählen, dann `main` und `/ (root)`. Nach etwa einer Minute ist die Seite unter `https://<dein-name>.github.io/nachhilfe-lernraum/` erreichbar.
+5. **App verbinden:** In [`config.js`](config.js) die Project URL (`https://<projekt-id>.supabase.co`, die ID steht in der Adresszeile des Dashboards) und den *Publishable key* eintragen. Den Key findest du unter *Project Settings → API Keys*.
+6. **Veröffentlichen:** Im GitHub-Repo unter *Settings → Pages* die *Source* „Deploy from a branch“ wählen, dann `main` und `/ (root)`. Nach etwa einer Minute ist die Seite unter `https://oliviajools.github.io/studybase/` erreichbar.
 
 Lokal testen geht mit `python3 -m http.server` im Projektordner. Danach http://localhost:8000 öffnen.
 
 ## Sicherheit
 
-- Der *anon key* in `config.js` ist öffentlich gedacht. Die Daten schützt die Datenbank über Row Level Security.
+- Der *Publishable key* in `config.js` ist öffentlich gedacht. Die Daten schützt die Datenbank über Row Level Security.
 - Die Lehrerin sieht und bearbeitet nur ihre eigenen Daten.
 - SchülerInnen haben **keinen direkten Zugriff auf die Tabellen**. Sie melden sich mit Name und PIN über `student_login()` an und bekommen ein zufälliges Sitzungs-Token. Mit diesem Token liefern die Datenbank-Funktionen nur die eigenen Daten.
 - PINs werden nur als bcrypt-Hash gespeichert. Nach 5 falschen Versuchen ist ein Profil 10 Minuten gesperrt. Eine neue PIN entsperrt es sofort und meldet alle Geräte ab.

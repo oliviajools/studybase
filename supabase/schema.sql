@@ -113,6 +113,12 @@ begin
   end loop;
 end $$;
 
+-- Rechte für die angemeldete Lehrerin ausdrücklich vergeben
+-- (neuere Supabase-Projekte geben neue Tabellen nicht mehr automatisch frei)
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.lessons, public.resources, public.homework, public.questions to authenticated;
+grant insert, update, delete on public.students to authenticated;
+
 -- Die PIN-Hashes und Sperr-Felder soll auch die Lehrerin-App nicht auslesen
 revoke select on public.students from anon, authenticated;
 grant  select (id, teacher_id, name, grade, subjects, next_appt, appt_note, created_at)
