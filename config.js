@@ -3,5 +3,5 @@
 // die Daten schützt die Datenbank selbst. Den "secret key" NIEMALS hier eintragen!
 window.LERNRAUM_CONFIG = {
   supabaseUrl: "https://cthhrqwxqmjmdsscaank.supabase.co",
-  supabaseAnonKey: ""   // hier den kompletten Publishable key einfügen: "sb_publishable_..."
+  supabaseAnonKey: "sb_publishable__-kHwAAORSyKSzyPYyoaAg_jYg8OdKK"
 };
