@@ -27,6 +27,41 @@ Ein kleines Dashboard für die Nachhilfe. SchülerInnen sehen dort zwischen den 
 
 Lokal testen geht mit `python3 -m http.server` im Projektordner. Danach http://localhost:8000 öffnen.
 
+## Stunden aufnehmen & auswerten (optional)
+
+Die Lehrerin kann eine Stunde im Tab **Stunde & Termin** aufnehmen oder eine vorhandene Audiodatei hochladen. Danach passiert automatisch:
+
+1. **Transkription:** Die Aufnahme wird alle 8 Minuten in einem Abschnitt an die Edge Function `transcribe` geschickt (OpenAI Whisper, Deutsch). Das Audio wird **nicht gespeichert**, nur der Text.
+2. **Auswertung:** Nach dem Beenden wertet die Edge Function `review` das Transkript mit Claude aus. Heraus kommen eine Zusammenfassung für die/den SchülerIn, Stärken, belegte Schwachstellen (mit Zitat), Missverständnisse, Übungsempfehlungen, der Fokus für die nächste Stunde und Beobachtungen zur Stunde. Die letzten Auswertungen fließen als Kontext ein, deshalb erkennt Claude wiederkehrende Schwächen.
+3. **Freigabe:** Die Auswertung ist zuerst ein Entwurf, den nur die Lehrerin sieht. Erst nach **„Freigeben“** sehen SchülerInnen die Zusammenfassung und die Übungen im Verlauf. Transkript und Schwachstellen bekommen sie nie zu sehen.
+4. **Verlauf:** Das **Schwachstellen-Radar** fasst die letzten 6 Auswertungen zusammen. Jede Übungsempfehlung lässt sich mit einem Klick als Hausaufgabe stellen.
+
+### Einrichtung (ca. 10 Minuten)
+
+1. **Datenbank erweitern:** Im SQL-Editor den Inhalt von [`supabase/review.sql`](supabase/review.sql) ausführen.
+2. **API-Keys besorgen:**
+   - OpenAI: platform.openai.com → API keys (Transkription ca. 0,006 $ pro Minute, also ca. 0,36 $ pro Stunde)
+   - Anthropic: console.anthropic.com → API Keys (Auswertung ca. 3–6 Cent pro Stunde)
+3. **Secrets hinterlegen:** In Supabase unter *Edge Functions → Secrets* diese Einträge anlegen:
+   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - optional `ANTHROPIC_MODEL` (Standard: `claude-sonnet-5`) und `TRANSCRIBE_MODEL` (Standard: `whisper-1`)
+4. **Functions anlegen:** Unter *Edge Functions → Deploy a new function → Via Editor* zwei Functions erstellen:
+   - `transcribe` mit dem Inhalt von [`supabase/functions/transcribe/index.ts`](supabase/functions/transcribe/index.ts)
+   - `review` mit dem Inhalt von [`supabase/functions/review/index.ts`](supabase/functions/review/index.ts)
+
+   Bei beiden unter *Details / Settings* die Option **„Verify JWT“ (Enforce JWT verification) ausschalten**. Die Functions prüfen die Anmeldung selbst.
+
+   Mit der Supabase-CLI geht es auch so: `supabase functions deploy transcribe --no-verify-jwt` und `supabase functions deploy review --no-verify-jwt`.
+5. **Einverständnis setzen:** Im Profil der/des SchülerIn „Einverständnis zur Aufnahme liegt vor“ einschalten. Ohne dieses Häkchen ist die Aufnahme gesperrt.
+
+### Datenschutz – bitte beachten
+
+- Aufnahmen von Minderjährigen brauchen die **schriftliche Einwilligung der Eltern** (DSGVO Art. 6/8). Informiere vorab, wofür die Aufnahme dient und dass das Audio an OpenAI (USA) und das Transkript an Anthropic (USA) übertragen wird.
+- Nach einer Auswertung kannst du das Transkript im Verlauf jederzeit löschen („Transkript löschen“). Die Auswertung bleibt dann erhalten.
+- Die KI-Auswertung ist ein Vorschlag, keine Diagnose. Prüf sie deshalb vor der Freigabe und korrigier die Zusammenfassung bei Bedarf.
+- Browser: Chrome oder Safari. Während der Aufnahme den Tab geöffnet lassen, der Bildschirm bleibt automatisch an.
+
 ## Sicherheit
 
 - Der *Publishable key* in `config.js` ist öffentlich gedacht. Die Daten schützt die Datenbank über Row Level Security.
@@ -43,4 +78,6 @@ styles.css            Design (hell/dunkel)
 app.js                gesamte App-Logik
 config.js             Supabase-Zugangsdaten (URL + anon key)
 supabase/schema.sql   Tabellen, Zugriffsregeln, Funktionen
+supabase/review.sql   Erweiterung: Transkript & Auswertung
+supabase/functions/   Edge Functions transcribe (Whisper) + review (Claude)
 ```
