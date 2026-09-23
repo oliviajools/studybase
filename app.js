@@ -14,7 +14,7 @@ let studentToken = null;     // Sitzungs-Token einer/eines SchülerIn
 const S = {students:[], lessons:[], homework:[], questions:[], resources:[], loaded:false};
 const ui = {
   mode:"login", loginAs:"student", studentId:null, tab:"start", filter:"Alle",
-  tStudent:null, tTab:"stunden", loginErr:"", busy:false, lastSync:null
+  tStudent:null, tTab:"stunden", loginErr:"", busy:false, lastSync:null, ex:null, openPack:"", reviewReady:false, tasksReady:false
 };
 
 /* ---------- Helfer ---------- */
@@ -66,19 +66,25 @@ function hwStatus(h){
 const sortHw = (a,b) => (a.done-b.done) || String(a.due||"9").localeCompare(String(b.due||"9"));
 
 /* ---------- Datenbank-Zeilen -> App-Objekte ---------- */
-const mapStudent = r => ({id:r.id, name:r.name, grade:r.grade||"", subjects:r.subjects||[], nextAppt:toLocalInput(r.next_appt), apptNote:r.appt_note||"", recordingConsent:!!r.recording_consent});
+const mapStudent = r => ({id:r.id, name:r.name, grade:r.grade||"", subjects:r.subjects||[], nextAppt:toLocalInput(r.next_appt), apptNote:r.appt_note||"", recordingConsent:!!r.recording_consent, autoHomework:!!r.auto_homework});
 const mapLesson = (r,sid) => ({id:r.id, studentId:r.student_id||sid, date:r.date, subject:r.subject, topic:r.topic, notes:r.notes||"", created:r.created_at,
   transcript:r.transcript||"", reviewStatus:r.review_status||"none", reviewError:r.review_error||"", summary:r.summary||"", practice:Array.isArray(r.practice)?r.practice:[],
   review:r.review||null, published:!!r.review_published, duration:r.duration_sec||0});
-const mapHw = (r,sid) => ({id:r.id, studentId:r.student_id||sid, title:r.title, description:r.description||"", subject:r.subject, due:r.due||"", resourceId:r.resource_id||"", done:!!r.done});
+const mapHw = (r,sid) => ({id:r.id, studentId:r.student_id||sid, title:r.title, description:r.description||"", subject:r.subject, due:r.due||"", resourceId:r.resource_id||"", done:!!r.done,
+  exercises:Array.isArray(r.exercises)?r.exercises:[], weakness:r.weakness||"", fromLesson:r.from_lesson||""});
 const mapQ = (r,sid) => ({id:r.id, studentId:r.student_id||sid, subject:r.subject, text:r.text, askedAt:r.asked_at, answer:r.answer||"", seen:!!r.seen});
 const mapRes = r => ({id:r.id, title:r.title, url:r.url, kind:r.kind, subject:r.subject, note:r.note||"", studentIds:r.student_ids||[], created:r.created_at});
 
 /* ---------- Laden ---------- */
 async function loadTeacher(){
   const cols = "id,name,grade,subjects,next_appt,appt_note";
-  let st = await sb.from("students").select(cols+",recording_consent").order("name");
-  if(st.error){ st = await sb.from("students").select(cols).order("name"); ui.reviewReady = false; } else ui.reviewReady = true;  // review.sql noch nicht ausgeführt
+  let st = await sb.from("students").select(cols+",recording_consent,auto_homework").order("name");
+  ui.reviewReady = ui.tasksReady = !st.error;
+  if(st.error){                                             // tasks.sql noch nicht ausgeführt?
+    st = await sb.from("students").select(cols+",recording_consent").order("name");
+    ui.reviewReady = !st.error;
+    if(st.error) st = await sb.from("students").select(cols).order("name");   // auch review.sql fehlt
+  }
   const [le,hw,qu,re] = await Promise.all([
     sb.from("lessons").select("*"),
     sb.from("homework").select("*"),
@@ -163,7 +169,7 @@ function setupView(){
 let lastKey="";
 function render(){
   const app=$("#app");
-  const key=[ui.mode,ui.loginAs,ui.studentId,ui.tab,ui.tStudent,ui.tTab].join("|");
+  const key=[ui.mode,ui.loginAs,ui.studentId,ui.tab,ui.tStudent,ui.tTab,ui.ex?"ex"+ui.ex.hw+ui.ex.i+ui.ex.hint+ui.ex.sol:"",ui.openPack].join("|");
   const changed = key!==lastKey;
   const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const paint = () => {
@@ -179,7 +185,7 @@ function render(){
     app.innerHTML = html;
     for(const [id,v] of Object.entries(drafts)){ const el=document.getElementById(id); if(!el) continue; if(el.type==="checkbox") el.checked=v; else el.value=v; }
     if(focusId && !changed){ const el=document.getElementById(focusId); if(el){ el.focus({preventScroll:true}); try{ if(selS!=null) el.setSelectionRange(selS,selE); }catch(e){} } }
-    if(changed && !reduce){
+    if(changed && !reduce && !ui.ex){
       // gestaffeltes Einblenden der Inhalte
       app.querySelectorAll(".hero, .next, .tabs, .stats, .panel, .item, .rcard, .q, .login-copy > *, .login").forEach((el,i)=>{ if(i<28){ el.classList.add("rv"); el.style.setProperty("--i", i); } });
       app.classList.remove("enter"); void app.offsetWidth; app.classList.add("enter");
@@ -319,7 +325,49 @@ function studentView(s){
     <div class="sub">${s.grade?`<span>${esc(s.grade)}</span>`:""}${(s.subjects||[]).map(subjChip).join("")}</div>
   </div>
   <nav class="tabs" role="tablist">${tabs.map(([k,l,c])=>`<button class="tab" role="tab" aria-selected="${ui.tab===k}" onclick="setTab('${k}')">${l}${c?`<span class="count">${c}</span>`:""}</button>`).join("")}</nav>
-  ${body}`;
+  ${body}
+  ${practiceSheet()}`;
+}
+
+/* ---------- Übungsmodus: eine Aufgabe nach der anderen ---------- */
+function openPractice(hwId){ ui.ex={hw:hwId, i:0, hint:false, sol:false}; render(); }
+function closePractice(){ ui.ex=null; render(); }
+function exStep(d){
+  const h=S.homework.find(x=>x.id===ui.ex.hw); if(!h) return closePractice();
+  const i=Math.min(h.exercises.length-1, Math.max(0, ui.ex.i+d));
+  ui.ex={hw:ui.ex.hw, i, hint:false, sol:false}; render();
+}
+async function finishPractice(){
+  const id=ui.ex.hw; ui.ex=null; render();
+  const h=S.homework.find(x=>x.id===id);
+  if(h && !h.done) await toggleHw(id); else render();
+}
+function practiceSheet(){
+  if(!ui.ex) return "";
+  const h=S.homework.find(x=>x.id===ui.ex.hw);
+  if(!h || !h.exercises.length) return "";
+  const e=h.exercises[ui.ex.i], n=h.exercises.length, last=ui.ex.i===n-1;
+  return `<div class="sheet-wrap" role="dialog" aria-modal="true" aria-label="Übungsaufgaben">
+    <div class="sheet-bg" onclick="closePractice()"></div>
+    <div class="sheet">
+      <div class="sheet-head"><div><div class="label">${esc(h.title)}</div>${h.weakness?`<div class="tiny muted" style="margin-top:4px">Übt: ${esc(h.weakness)}</div>`:""}</div>
+        <button class="btn ghost icon" onclick="closePractice()" aria-label="Schließen">✕</button></div>
+      <div class="sheet-dots">${h.exercises.map((_,i)=>`<span class="${i<ui.ex.i?"ok":i===ui.ex.i?"now":""}"></span>`).join("")}</div>
+      <div class="sheet-body">
+        <div class="label">Aufgabe ${pad(ui.ex.i+1)} von ${pad(n)}</div>
+        <p class="ex-q">${esc(e.question)}</p>
+        ${ui.ex.hint&&e.hint?`<div class="ex-hint"><span class="label">Tipp</span>${esc(e.hint)}</div>`:""}
+        ${ui.ex.sol?`<div class="ex-sol"><span class="label">Lösung</span>${esc(e.solution)}</div>`:""}
+      </div>
+      <div class="sheet-actions">
+        ${e.hint&&!ui.ex.hint?`<button class="btn sm ghost" onclick="ui.ex.hint=true;render()">Tipp</button>`:""}
+        ${!ui.ex.sol?`<button class="btn sm" onclick="ui.ex.sol=true;render()">Lösung zeigen</button>`:""}
+        <span style="flex:1"></span>
+        ${ui.ex.i>0?`<button class="btn sm ghost" onclick="exStep(-1)">Zurück</button>`:""}
+        ${last?`<button class="btn primary sm" onclick="finishPractice()">Fertig & abhaken <span class="arr">→</span></button>`
+              :`<button class="btn primary sm" onclick="exStep(1)">Weiter <span class="arr">→</span></button>`}
+      </div>
+    </div></div>`;
 }
 function setTab(t){ ui.tab=t; render(); if(t==="fragen") markSeen(); }
 async function markSeen(){
@@ -352,7 +400,8 @@ function hwItems(list,teacher){
       ${teacher?`<span class="stripe" style="--c:${col(h.subject)}"></span>`:`<button class="tick ${h.done?"on":""}" aria-pressed="${h.done}" aria-label="${h.done?"Als offen markieren":"Als erledigt markieren"}" onclick="toggleHw('${h.id}')">${ICON.check}</button>`}
       <div class="main"><div class="t">${esc(h.title)}</div>
         ${h.description?`<div class="d">${esc(h.description)}</div>`:""}
-        <div class="meta">${subjChip(h.subject)} ${hwStatus(h)} ${res&&url(res.url)?`<a class="chip" href="${esc(url(res.url))}" target="_blank" rel="noopener">${KINDS[res.kind]||"Link"} ↗</a>`:""}</div></div>
+        <div class="meta">${subjChip(h.subject)} ${hwStatus(h)} ${res&&url(res.url)?`<a class="chip" href="${esc(url(res.url))}" target="_blank" rel="noopener">${KINDS[res.kind]||"Link"} ↗</a>`:""}
+          ${h.exercises&&h.exercises.length?(teacher?`<span class="chip">${h.exercises.length} ${h.exercises.length===1?"Aufgabe":"Aufgaben"}</span>`:`<button class="btn sm" onclick="openPractice('${h.id}')">Üben · ${h.exercises.length} ${h.exercises.length===1?"Aufgabe":"Aufgaben"} <span class="arr">→</span></button>`):""}</div></div>
       ${teacher?`<div class="row"><button class="btn sm ghost" onclick="toggleHw('${h.id}')">${h.done?"Wieder öffnen":"Erledigt"}</button><button class="btn sm ghost danger" aria-label="Löschen" onclick="delRow('homework','${h.id}')">✕</button></div>`:""}
     </div>`;}).join("");
 }
@@ -642,6 +691,7 @@ function profileTab(s){
       <div class="field"><label for="pf-grade">Klasse / Schulform</label><input id="pf-grade" type="text" value="${esc(s.grade||"")}"></div>
       <div class="field"><label>Fächer</label><div class="checks">${SUBJECTS.map(x=>`<label><input type="checkbox" id="pf-s-${x}" ${(s.subjects||[]).includes(x)?"checked":""}> ${x}</label>`).join("")}</div></div>
       ${ui.reviewReady?`<label class="switch"><input type="checkbox" id="pf-consent" ${s.recordingConsent?"checked":""}><span class="track"></span><span><strong>Einverständnis zur Aufnahme liegt vor</strong><br><span class="muted small">Schriftlich, bei Minderjährigen von den Eltern. Erst dann lassen sich Stunden aufnehmen.</span></span></label>`:""}
+      ${ui.tasksReady?`<label class="switch"><input type="checkbox" id="pf-auto" ${s.autoHomework?"checked":""}><span class="track"></span><span><strong>Übungen automatisch als Hausaufgabe stellen</strong><br><span class="muted small">Sobald du eine Auswertung freigibst, werden alle Übungspakete gestellt – fällig zum nächsten Termin.</span></span></label>`:""}
       <div><button class="btn primary" onclick="saveProfile('${s.id}')">Speichern</button></div></div>
     <div class="stack" style="gap:16px"><div class="panel stack"><h2>Neue PIN vergeben</h2>
       <p class="muted small">Entsperrt das Profil auch nach zu vielen Fehlversuchen und meldet alle Geräte ab.</p>
@@ -654,6 +704,7 @@ async function saveProfile(id){
   const name=$("#pf-name").value.trim(); if(!name) return toast("Der Name darf nicht leer sein.");
   const row={name,grade:$("#pf-grade").value.trim(),subjects:SUBJECTS.filter(x=>$("#pf-s-"+x).checked)};
   const c=$("#pf-consent"); if(c) row.recording_consent=c.checked;
+  const a=$("#pf-auto"); if(a) row.auto_homework=a.checked;
   await run(sb.from("students").update(row).eq("id",id),"Profil gespeichert");
 }
 async function resetPin(id){
@@ -863,21 +914,38 @@ function reviewCard(l){
   const head=`<div class="rev-head"><div><div class="label">${fmtShort(l.date)} · ${esc(l.subject)}${l.duration?` · ${Math.round(l.duration/60)} Min`:""}</div>
       <h3 class="rev-title">${esc(l.topic)}</h3></div>
       ${l.reviewStatus==="done"?(l.published?`<span class="chip ok">freigegeben</span>`:`<span class="chip warn">Entwurf · nur für dich</span>`):l.reviewStatus==="error"?`<span class="chip bad">Fehler</span>`:""}</div>`;
-  if(inProgress && l.reviewStatus!=="done") return `<div class="panel review">${head}${reviewSteps(l)}<p class="muted small">${REC.analyzing.has(l.id)||l.reviewStatus==="analyzing"?"Claude wertet die Stunde aus – das dauert meist unter einer Minute.":"Transkription läuft …"}</p></div>`;
+  if(inProgress && l.reviewStatus!=="done") return `<div class="panel review">${head}${reviewSteps(l)}<p class="muted small">${REC.analyzing.has(l.id)||l.reviewStatus==="analyzing"?"Claude wertet die Stunde aus und baut die Übungsaufgaben – das dauert meist ein bis zwei Minuten.":"Transkription läuft …"}</p></div>`;
   if(l.reviewStatus==="error") return `<div class="panel review">${head}<p class="err" style="margin:10px 0 14px">${esc(l.reviewError||"Unbekannter Fehler")}</p>
       <div class="row">${l.transcript?`<button class="btn sm" onclick="analyzeLesson('${l.id}')">Erneut auswerten</button>`:""}<button class="btn sm ghost danger" onclick="delRow('lessons','${l.id}')">Stunde löschen</button></div>${transcriptBox(l)}</div>`;
   if(l.reviewStatus!=="done") return "";
   const sev={hoch:"bad",mittel:"warn",niedrig:""};
   const list=(arr)=>arr&&arr.length?`<ul class="rev-list">${arr.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:`<p class="muted small">—</p>`;
+  const given=byStudent(S.homework,l.studentId).filter(h=>h.fromLesson===l.id);
+  const pack=(l.practice||[]).map((p,i)=>{
+    const res=p.resource_id?S.resources.find(r=>r.id===p.resource_id):null;
+    const already=given.some(h=>h.title===p.title);
+    return `<div class="pack ${already?"given":""}">
+      <label class="pack-h"><input type="checkbox" id="pk-${l.id}-${i}" ${already?"disabled":"checked"}>
+        <span class="main"><span class="t">${esc(p.title)}</span>${p.weakness?`<span class="label">zu: ${esc(p.weakness)}</span>`:""}</span>
+        ${already?`<span class="chip ok">gestellt</span>`:`<span class="chip">${(p.exercises||[]).length} ${(p.exercises||[]).length===1?"Aufgabe":"Aufgaben"}</span>`}</label>
+      <div class="d">${esc(p.description||"")}</div>
+      <div class="row" style="margin-top:8px">
+        ${res&&url(res.url)?`<a class="chip" href="${esc(url(res.url))}" target="_blank" rel="noopener">${KINDS[res.kind]||"Link"}: ${esc(res.title)} ↗</a>`:`<span class="label">kein Material verknüpft</span>`}
+        ${(p.exercises||[]).length?`<button class="linkbtn" onclick="ui.openPack=ui.openPack==='${l.id}-${i}'?'':'${l.id}-${i}';render()">${ui.openPack===l.id+"-"+i?"Aufgaben ausblenden":"Aufgaben ansehen"}</button>`:""}
+      </div>
+      ${ui.openPack===l.id+"-"+i?`<div class="ex-list">${(p.exercises||[]).map((e,n)=>`<div class="ex"><div class="q"><span class="mono">${pad(n+1)}</span> ${esc(e.question)}</div>
+        ${e.hint?`<div class="small muted">Tipp: ${esc(e.hint)}</div>`:""}<div class="small sol">Lösung: ${esc(e.solution)}</div></div>`).join("")}</div>`:""}
+    </div>`;}).join("");
   return `<div class="panel review">${head}
     ${rv.transcript_quality&&rv.transcript_quality!=="gut"?`<div class="banner" style="margin:14px 0 0">Transkript-Qualität: ${esc(rv.transcript_quality)} – Auswertung mit Vorsicht lesen.</div>`:""}
     <div class="rev-grid">
       <section>
         <div class="label">Für ${esc(firstName(s?.name||""))} · Zusammenfassung</div>
         <textarea id="sum-${l.id}" class="rev-sum">${esc(l.summary)}</textarea>
-        <div class="label" style="margin-top:18px">Übungsempfehlungen</div>
-        <div class="stack" style="margin-top:10px">${(l.practice||[]).map((p,i)=>`<div class="item"><div class="main"><div class="t">${esc(p.title)}</div><div class="d">${esc(p.description||"")}</div></div>
-          <button class="btn sm ghost" title="Als Hausaufgabe stellen" onclick="practiceToHw('${l.id}',${i})">+ Aufgabe</button></div>`).join("")||`<p class="muted small">—</p>`}</div>
+        <div class="label" style="margin-top:18px">Übungspakete aus den Schwachstellen</div>
+        <div class="stack" style="margin-top:10px">${pack||`<p class="muted small">—</p>`}</div>
+        ${(l.practice||[]).length?`<div class="row" style="margin-top:14px"><button class="btn sm" onclick="assignPack('${l.id}')">Ausgewählte als Hausaufgabe stellen</button>
+          ${s&&s.autoHomework?`<span class="label">Automatik an</span>`:""}</div>`:""}
       </section>
       <section>
         <div class="label">Schwachstellen · nur für dich</div>
@@ -899,6 +967,24 @@ function reviewCard(l){
     ${transcriptBox(l)}
   </div>`;
 }
+/* Übungspakete als Hausaufgaben anlegen */
+function packRow(l,p){
+  const s=student(l.studentId);
+  return {student_id:l.studentId, title:p.title, description:p.description||"", subject:l.subject,
+    due:(s?.nextAppt||"").slice(0,10)||null, resource_id:p.resource_id||null,
+    exercises:p.exercises||[], weakness:p.weakness||"", from_lesson:l.id};
+}
+async function assignPack(lid, silent){
+  const l=S.lessons.find(x=>x.id===lid); if(!l) return;
+  const given=byStudent(S.homework,l.studentId).filter(h=>h.fromLesson===l.id).map(h=>h.title);
+  const rows=(l.practice||[]).filter((p,i)=>{
+    if(given.includes(p.title)) return false;
+    if(silent) return true;
+    const box=$(`#pk-${lid}-${i}`); return !box || box.checked;
+  }).map(p=>packRow(l,p));
+  if(!rows.length){ if(!silent) toast("Nichts ausgewählt oder schon gestellt."); return; }
+  await run(sb.from("homework").insert(rows), `${rows.length} ${rows.length===1?"Aufgabe":"Aufgaben"} gestellt`);
+}
 function transcriptBox(l){
   if(!l.transcript) return "";
   return `<details class="box" style="margin-top:16px"><summary>Transkript · ${l.transcript.split(/\s+/).length} Wörter</summary>
@@ -907,12 +993,14 @@ function transcriptBox(l){
 }
 async function publishReview(id, on){
   const el=$("#sum-"+id); const row={review_published:on}; if(el) row.summary=el.value.trim();
-  await run(sb.from("lessons").update(row).eq("id",id), on?"Für SchülerIn freigegeben":"Freigabe zurückgezogen");
+  const ok=await run(sb.from("lessons").update(row).eq("id",id), on?"Für SchülerIn freigegeben":"Freigabe zurückgezogen");
+  if(!ok || !on) return;
+  const l=S.lessons.find(x=>x.id===id), s=l&&student(l.studentId);
+  if(s&&s.autoHomework) await assignPack(id, true);   // Automatik: alle Übungen direkt stellen
 }
 async function practiceToHw(lid,i){
   const l=S.lessons.find(x=>x.id===lid); const p=l&&l.practice[i]; if(!p) return;
-  const s=student(l.studentId);
-  await run(sb.from("homework").insert({student_id:l.studentId,title:p.title,description:p.description||"",subject:l.subject,due:(s?.nextAppt||"").slice(0,10)||null}),"Als Hausaufgabe gestellt");
+  await run(sb.from("homework").insert(packRow(l,p)),"Als Hausaufgabe gestellt");
 }
 async function clearTranscript(id){ if(!confirmDel("tr"+id)) return; await run(sb.from("lessons").update({transcript:""}).eq("id",id),"Transkript gelöscht"); }
 
