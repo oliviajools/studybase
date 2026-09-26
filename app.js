@@ -914,7 +914,17 @@ function reviewCard(l){
   const head=`<div class="rev-head"><div><div class="label">${fmtShort(l.date)} · ${esc(l.subject)}${l.duration?` · ${Math.round(l.duration/60)} Min`:""}</div>
       <h3 class="rev-title">${esc(l.topic)}</h3></div>
       ${l.reviewStatus==="done"?(l.published?`<span class="chip ok">freigegeben</span>`:`<span class="chip warn">Entwurf · nur für dich</span>`):l.reviewStatus==="error"?`<span class="chip bad">Fehler</span>`:""}</div>`;
-  if(inProgress && l.reviewStatus!=="done") return `<div class="panel review">${head}${reviewSteps(l)}<p class="muted small">${REC.analyzing.has(l.id)||l.reviewStatus==="analyzing"?"Claude wertet die Stunde aus und baut die Übungsaufgaben – das dauert meist ein bis zwei Minuten.":"Transkription läuft …"}</p></div>`;
+  if(inProgress && l.reviewStatus!=="done"){
+    // Läuft die Aufnahme wirklich noch, oder ist sie abgebrochen (Akku leer, Tab geschlossen)?
+    const live = REC.active && REC.lessonId===l.id, busy = REC.analyzing.has(l.id) || REC.queue.some(j=>j.lessonId===l.id) || REC.uploading;
+    const stuck = !live && !busy && l.reviewStatus!=="analyzing";
+    return `<div class="panel review">${head}${reviewSteps(l)}
+      ${stuck?`<div class="banner" style="margin:0 0 16px">Diese Aufnahme wurde unterbrochen – vermutlich war der Akku leer oder der Tab geschlossen. Alles bis zum letzten vollständigen 8-Minuten-Abschnitt ist gesichert; nur der angefangene Abschnitt danach ist verloren.</div>
+        <div class="row">${l.transcript?`<button class="btn primary sm" onclick="analyzeLesson('${l.id}')">Mit dem vorhandenen Transkript auswerten <span class="arr">→</span></button>`:""}
+          <button class="btn sm ghost danger" onclick="delRow('lessons','${l.id}')">Stunde löschen</button></div>`
+      :`<p class="muted small">${busy&&(REC.analyzing.has(l.id)||l.reviewStatus==="analyzing")?"Claude wertet die Stunde aus und baut die Übungsaufgaben – das dauert meist ein bis zwei Minuten.":"Transkription läuft …"}</p>`}
+      ${transcriptBox(l)}</div>`;
+  }
   if(l.reviewStatus==="error") return `<div class="panel review">${head}<p class="err" style="margin:10px 0 14px">${esc(l.reviewError||"Unbekannter Fehler")}</p>
       <div class="row">${l.transcript?`<button class="btn sm" onclick="analyzeLesson('${l.id}')">Erneut auswerten</button>`:""}<button class="btn sm ghost danger" onclick="delRow('lessons','${l.id}')">Stunde löschen</button></div>${transcriptBox(l)}</div>`;
   if(l.reviewStatus!=="done") return "";

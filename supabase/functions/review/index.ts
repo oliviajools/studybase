@@ -158,9 +158,14 @@ Offene Hausaufgaben: ${(hw ?? []).map((h: any) => `${h.title} (${h.subject})`).j
     }),
   });
   if (!r.ok) {
-    const detail = (await r.text()).slice(0, 400);
-    await sb.from("lessons").update({ review_status: "error", review_error: `Auswertung fehlgeschlagen (${r.status})` }).eq("id", lessonId);
-    return json({ error: "review_failed", status: r.status, detail }, 502);
+    const raw = await r.text();
+    let msg = raw.slice(0, 300);
+    try { msg = JSON.parse(raw)?.error?.message ?? msg; } catch { /* kein JSON */ }
+    await sb.from("lessons").update({
+      review_status: "error",
+      review_error: `Auswertung fehlgeschlagen (${r.status}): ${String(msg).slice(0, 400)}`,
+    }).eq("id", lessonId);
+    return json({ error: "review_failed", status: r.status, detail: msg }, 502);
   }
   const out = await r.json();
   const call = (out.content ?? []).find((c: any) => c.type === "tool_use");

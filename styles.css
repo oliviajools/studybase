@@ -400,3 +400,4 @@ details.box>.inner{padding:0 18px 16px}
 .ex-hint .label,.ex-sol .label{display:block;margin-bottom:5px;color:inherit;opacity:.75}
 .sheet-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:16px}
 @media (max-width:600px){.sheet{padding:20px 18px;max-height:92vh}.sheet-actions{gap:6px}}
+.review .err{white-space:pre-wrap;overflow-wrap:anywhere;max-width:80ch}

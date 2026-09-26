@@ -62,9 +62,14 @@ Deno.serve(async (req) => {
     method: "POST", headers: { Authorization: `Bearer ${openaiKey}` }, body,
   });
   if (!r.ok) {
-    const detail = (await r.text()).slice(0, 300);
-    await sb.from("lessons").update({ review_status: "error", review_error: `Transkription fehlgeschlagen (${r.status})` }).eq("id", lessonId);
-    return json({ error: "transcription_failed", status: r.status, detail }, 502);
+    const raw = await r.text();
+    let msg = raw.slice(0, 300);
+    try { msg = JSON.parse(raw)?.error?.message ?? msg; } catch { /* kein JSON */ }
+    await sb.from("lessons").update({
+      review_status: "error",
+      review_error: `Transkription fehlgeschlagen (${r.status}): ${String(msg).slice(0, 400)}`,
+    }).eq("id", lessonId);
+    return json({ error: "transcription_failed", status: r.status, detail: msg }, 502);
   }
   const { text } = await r.json();
   const clean = String(text ?? "").trim();
